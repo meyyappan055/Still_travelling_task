@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import requests
 
@@ -10,7 +10,7 @@ load_dotenv()
 API_KEY = os.getenv("API_KEY")
 
 app = FastAPI()
-youtube = build('youtube','v3',developerKey= API_KEY)
+youtube = build('youtube', 'v3', developerKey=API_KEY)
 
 
 class VideoRequest(BaseModel):
@@ -18,67 +18,99 @@ class VideoRequest(BaseModel):
     no_of_results: int
 
 
-@app.post("/get_videos")
-async def get_videos(request: VideoRequest):
-    search_query = request.search_query
-    no_of_results = request.no_of_results
+def get_video_details(video_id: str):
+    try:
+        stats_url = f"https://www.googleapis.com/youtube/v3/videos?part=statistics&id={video_id}&key={API_KEY}"
+        response = requests.get(stats_url)
+        response.raise_for_status()
+        stats_data = response.json().get("items", [])[0].get("statistics", {})
+        view_count = stats_data.get("viewCount", 0)
+        comment_count = stats_data.get("commentCount", 0)
+        return view_count, comment_count
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in getting video details: {e}")
 
-    res = youtube.search().list(
-        part="snippet",
-        q = search_query,
-        type="video",
-        maxResults = no_of_results
-    ).execute()
 
-    data =[]
-    for each in range(no_of_results):
+def get_video_duration(video_id: str):
+    try:
+        details_url = f"https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id={video_id}&key={API_KEY}"
+        response = requests.get(details_url)
+        response.raise_for_status()
+        return response.json().get("items", [])[0].get("contentDetails", {}).get("duration", "")
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in getting video duration: {e}")
 
-        videourl = f"https://www.youtube.com/watch?v={res['items'][each]['id']['videoId']}"
+
+def get_video_category_name(video_id: str):
+    try:
+        video_url = f"https://www.googleapis.com/youtube/v3/videos?part=snippet&id={video_id}&key={API_KEY}"
+        response = requests.get(video_url)
+        response.raise_for_status()
+        category_id = response.json().get("items", [])[0].get("snippet", {}).get("categoryId", "")
+        
+        category_url = f"https://www.googleapis.com/youtube/v3/videoCategories?part=snippet&id={category_id}&key={API_KEY}"
+        category_response = requests.get(category_url)
+        category_response.raise_for_status()
+        return category_response.json().get("items", [])[0].get("snippet", {}).get("title", "")
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in getting video category: {e}")
+
+
+def extract_tags_from_description(description: str):
+    tags_in_desc = []
+    formatted_desc = description.split(" ")
+    for word in formatted_desc:
+        if "#" in word:
+            tags_in_desc.append(word.strip())
+
+    return tags_in_desc
+
+
+def fetch_video_data(res, each, search_query):
+    try:
         video_id = res['items'][each]['id']['videoId']
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
         title = res["items"][each]["snippet"]["title"]
         desc = res["items"][each]["snippet"]["description"]
         channelTitle = res["items"][each]["snippet"]["channelTitle"]
-
-        tags_in_desc = []
-        formatted_desc = desc.split(" ")
-        for word in range(formatted_desc):
-            if "#" in word:
-                tags_in_desc.append(word.strip())
-
-        tags = res["items"][each]["snippet"].get("tags", []) #empty if no tag is there
+        tags_in_desc = extract_tags_from_description(desc)
+        tags = res["items"][each]["snippet"].get("tags", [])
         tags += tags_in_desc
-
         topic = search_query
         publishedAt = res["items"][each]["snippet"]["publishedAt"]
-        
+        view_count, comment_count = get_video_details(video_id)
+        duration = get_video_duration(video_id)
+        category_name = get_video_category_name(video_id)
 
-        stats_url = f"https://www.googleapis.com/youtube/v3/videos?part=statistics&id={video_id}&key={API_KEY}"
-        response = requests.get(stats_url)
-        stats_data = response.json()["items"][0]["statistics"]
-        view_count = stats_data["viewCount"]
-        comment_count = stats_data.get("commentCount", 0) #default = 0
-
-
-        details_url = f"https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id={video_id}&key={API_KEY}"
-        response = requests.get(details_url)
-        duration = response.json()["items"][0]["contentDetails"]["duration"]
+        return [video_url, title, desc, channelTitle, topic, publishedAt, tags, view_count, duration, category_name, comment_count]
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in processing video data: {e}")
 
 
-        #get category id of the video
-        video_url = f"https://www.googleapis.com/youtube/v3/videos?part=snippet&id={video_id}&key={API_KEY}"
-        video_response = requests.get(video_url)
-        category_id = video_response.json()["items"][0]["snippet"]["categoryId"]
+@app.post("/get_videos")
+async def get_videos(request: VideoRequest):
+    try:
+        search_query = request.search_query
+        no_of_results = request.no_of_results
+        res = youtube.search().list(
+            part="snippet",
+            q=search_query,
+            type="video",
+            maxResults=no_of_results
+        ).execute()
 
-        
-        #category name from category id
-        category_url = f"https://www.googleapis.com/youtube/v3/videoCategories?part=snippet&id={category_id}&key={API_KEY}"
-        category_response = requests.get(category_url)
-        category_name = category_response.json()["items"][0]["snippet"]["title"]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in fetching YouTube search results: {e}")
 
-        content = [videourl, title, desc, channelTitle, topic, publishedAt,tags , view_count, duration, category_name , comment_count]
-        
-
-        data.append(content)
+    data = []
+    for each in range(no_of_results):
+        try:
+            video_data = fetch_video_data(res, each, search_query)
+            data.append(video_data)
+        except HTTPException as e:
+            raise e  
 
     return {"data": data}
-
