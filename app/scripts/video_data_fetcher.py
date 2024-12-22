@@ -5,6 +5,7 @@ from googleapiclient.discovery import build
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import requests
+from transcript import get_transcript
 
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
@@ -29,6 +30,15 @@ def get_video_details(video_id: str):
         return view_count, comment_count
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in getting video details: {e}")
+
+
+def get_video_transcript(video_id: str):
+    try : 
+        transcript = get_transcript(video_id)
+        return {"transcript": transcript, "has_transcript": True}
+    
+    except Exception as e:
+        return {"transcript": f"error occured in fetching: {e}","has_transctipt": False}
 
 
 def get_video_duration(video_id: str):
@@ -83,8 +93,9 @@ def fetch_video_data(res, each, search_query):
         view_count, comment_count = get_video_details(video_id)
         duration = get_video_duration(video_id)
         category_name = get_video_category_name(video_id)
+        transcript_data = get_transcript(video_id)
 
-        return [video_url, title, desc, channelTitle, topic, publishedAt, tags, view_count, duration, category_name, comment_count]
+        return [video_url, title, desc, channelTitle, topic, publishedAt, tags, view_count, duration, category_name, comment_count, transcript_data]
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in processing video data: {e}")
