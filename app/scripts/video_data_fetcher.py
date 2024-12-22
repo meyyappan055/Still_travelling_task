@@ -101,6 +101,25 @@ def fetch_video_data(res, each, search_query):
         raise HTTPException(status_code=500, detail=f"Error in processing video data: {e}")
 
 
+def save_to_csv(data):
+    columns = [
+        "Video_url",
+        "Title",
+        "Description",
+        "Channel Title",
+        "Tags",
+        "Topic",
+        "Published at",
+        "Views Counts",
+        "Comment Counts",
+        "Duration",
+        "Category Name",
+        "Transcript"
+    ]
+    df = pd.DataFrame(data,columns=columns)
+    df.to_csv("video_data.csv",index=False)
+
+
 @app.post("/get_videos")
 async def get_videos(request: VideoRequest):
     try:
@@ -123,5 +142,7 @@ async def get_videos(request: VideoRequest):
             data.append(video_data)
         except HTTPException as e:
             raise e  
+
+    save_to_csv(data)
 
     return {"data": data}
