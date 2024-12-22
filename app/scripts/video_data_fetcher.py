@@ -38,7 +38,16 @@ async def get_videos(request: VideoRequest):
         title = res["items"][each]["snippet"]["title"]
         desc = res["items"][each]["snippet"]["description"]
         channelTitle = res["items"][each]["snippet"]["channelTitle"]
+
+        tags_in_desc = []
+        formatted_desc = desc.split(" ")
+        for word in range(formatted_desc):
+            if "#" in word:
+                tags_in_desc.append(word.strip())
+
         tags = res["items"][each]["snippet"].get("tags", []) #empty if no tag is there
+        tags += tags_in_desc
+
         topic = search_query
         publishedAt = res["items"][each]["snippet"]["publishedAt"]
         
