@@ -7,8 +7,12 @@ from pydantic import BaseModel
 import requests
 from transcript import get_transcript
 
-load_dotenv()
-API_KEY = os.getenv("API_KEY")
+current_dir = os.path.dirname(os.path.realpath(__file__))
+dotenv_path = os.path.join(current_dir, '..', '.env')
+
+load_dotenv(dotenv_path=dotenv_path)
+
+API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 app = FastAPI()
 youtube = build('youtube', 'v3', developerKey=API_KEY)
@@ -95,7 +99,7 @@ def fetch_video_data(res, each, search_query):
         category_name = get_video_category_name(video_id)
         transcript_data = get_transcript(video_id)
 
-        return [video_url, title, desc, channelTitle, topic, publishedAt, tags, view_count, duration, category_name, comment_count, transcript_data]
+        return [video_url, title, desc, channelTitle, tags, topic, publishedAt, view_count, comment_count, duration, category_name,  transcript_data]
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in processing video data: {e}")
