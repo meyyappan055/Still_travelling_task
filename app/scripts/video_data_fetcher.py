@@ -42,7 +42,7 @@ def get_video_transcript(video_id: str):
         return {"transcript": transcript, "has_transcript": True}
     
     except Exception as e:
-        return {"transcript": f"error occured in fetching: {e}","has_transctipt": False}
+        return {"transcript": f"error occured in fetching: {e}","has_transcript": False}
 
 
 def get_video_duration(video_id: str):
@@ -97,10 +97,24 @@ def fetch_video_data(res, each, search_query):
         view_count, comment_count = get_video_details(video_id)
         duration = get_video_duration(video_id)
         category_name = get_video_category_name(video_id)
-        transcript_data = get_transcript(video_id)
+        transcript_data = get_video_transcript(video_id)
 
-        return [video_url, title, desc, channelTitle, tags, topic, publishedAt, view_count, comment_count, duration, category_name,  transcript_data]
-    
+       
+        location = "location not mentioned"
+        try:
+            details_url = f"https://www.googleapis.com/youtube/v3/videos?part=recordingDetails&id={video_id}&key={API_KEY}"
+            response = requests.get(details_url)
+            response.raise_for_status()
+            recording_details = response.json().get("items", [])[0].get("recordingDetails", {})
+            location = recording_details.get("location", "location not mentioned")
+        except Exception as e:
+            location = f"Error fetching location: {e}"
+
+        return [
+            video_url, title, desc, channelTitle, tags, topic, publishedAt,
+            view_count, comment_count, duration, category_name, transcript_data, location
+        ]
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in processing video data: {e}")
 
@@ -118,10 +132,18 @@ def save_to_csv(data):
         "Comment Counts",
         "Duration",
         "Category Name",
-        "Transcript"
+        "Transcript",
+        "Location"
     ]
-    df = pd.DataFrame(data,columns=columns)
-    df.to_csv("video_data.csv",index=False)
+
+    try:    
+        df = pd.DataFrame(data,columns=columns)
+        if not os.path.exists("app/data/video_data.csv"):
+            df.to_csv("app/data/video_data.csv", index=False, mode='w', header=True)
+        else:
+            df.to_csv("app/data/video_data.csv", index=False, mode='a', header=False)
+    except Exception as e:
+        return {"error": f"Error in saving data to CSV: {e}"}
 
 
 @app.post("/get_videos")
@@ -129,24 +151,38 @@ async def get_videos(request: VideoRequest):
     try:
         search_query = request.search_query
         no_of_results = request.no_of_results
-        res = youtube.search().list(
-            part="snippet",
-            q=search_query,
-            type="video",
-            maxResults=no_of_results
-        ).execute()
+
+        next_page_token = None
+        data = []
+
+        while len(data) < no_of_results:
+            max_results = min(50, no_of_results - len(data))  
+            res = youtube.search().list(
+                part="snippet",
+                q=search_query,
+                type="video",
+                maxResults=max_results,
+                pageToken=next_page_token  
+            ).execute()
+
+            for each in range(len(res["items"])):
+                try:
+                    video_data = fetch_video_data(res, each, search_query)
+                    data.append(video_data)
+                except Exception as e:
+                    data.append([f"Error processing video: {e}"])
+
+            next_page_token = res.get('nextPageToken') 
+            if not next_page_token: 
+                break
+
+        save_to_csv(data)
+
+        return {"data": data}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in fetching YouTube search results: {e}")
 
-    data = []
-    for each in range(no_of_results):
-        try:
-            video_data = fetch_video_data(res, each, search_query)
-            data.append(video_data)
-        except HTTPException as e:
-            raise e  
 
-    save_to_csv(data)
+    
 
-    return {"data": data}
