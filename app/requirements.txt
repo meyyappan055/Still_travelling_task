@@ -3,3 +3,5 @@ fastapi
 uvicorn
 requests
 youtube-transcript-api
+httpx
+uvicorn
