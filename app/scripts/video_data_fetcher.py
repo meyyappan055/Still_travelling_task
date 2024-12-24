@@ -4,8 +4,9 @@ from dotenv import load_dotenv
 from googleapiclient.discovery import build
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import requests
 from transcript import get_transcript
+import asyncio
+import httpx
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 dotenv_path = os.path.join(current_dir, '..', '.env')
@@ -23,17 +24,19 @@ class VideoRequest(BaseModel):
     no_of_results: int
 
 
-def get_video_details(video_id: str):
-    try:
-        stats_url = f"https://www.googleapis.com/youtube/v3/videos?part=statistics&id={video_id}&key={API_KEY}"
-        response = requests.get(stats_url)
-        response.raise_for_status()
-        stats_data = response.json().get("items", [])[0].get("statistics", {})
-        view_count = stats_data.get("viewCount", 0)
-        comment_count = stats_data.get("commentCount", 0)
-        return view_count, comment_count
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error in getting video details: {e}")
+async def get_video_details(video_id: str):
+    stats_url = f"https://www.googleapis.com/youtube/v3/videos?part=statistics&id={video_id}&key={API_KEY}"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(stats_url)
+            response.raise_for_status()
+            stats_data = response.json().get("items", [])[0].get("statistics", {})
+            view_count = stats_data.get("viewCount", 0)
+            comment_count = stats_data.get("commentCount", 0)
+            return view_count, comment_count
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error in getting video details: {e}")
 
 
 def get_video_transcript(video_id: str):
@@ -45,31 +48,33 @@ def get_video_transcript(video_id: str):
         return {"transcript": f"error occured in fetching: {e}","has_transcript": False}
 
 
-def get_video_duration(video_id: str):
-    try:
-        details_url = f"https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id={video_id}&key={API_KEY}"
-        response = requests.get(details_url)
-        response.raise_for_status()
-        return response.json().get("items", [])[0].get("contentDetails", {}).get("duration", "")
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error in getting video duration: {e}")
+async def get_video_duration(video_id: str):
+    details_url = f"https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id={video_id}&key={API_KEY}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(details_url)
+            response.raise_for_status()
+            return response.json().get("items", [])[0].get("contentDetails", {}).get("duration", "")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error in getting video duration: {e}")
 
 
-def get_video_category_name(video_id: str):
-    try:
-        video_url = f"https://www.googleapis.com/youtube/v3/videos?part=snippet&id={video_id}&key={API_KEY}"
-        response = requests.get(video_url)
-        response.raise_for_status()
-        category_id = response.json().get("items", [])[0].get("snippet", {}).get("categoryId", "")
-        
-        category_url = f"https://www.googleapis.com/youtube/v3/videoCategories?part=snippet&id={category_id}&key={API_KEY}"
-        category_response = requests.get(category_url)
-        category_response.raise_for_status()
-        return category_response.json().get("items", [])[0].get("snippet", {}).get("title", "")
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error in getting video category: {e}")
+async def get_video_category_name(video_id: str):
+    video_url = f"https://www.googleapis.com/youtube/v3/videos?part=snippet&id={video_id}&key={API_KEY}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(video_url)
+            response.raise_for_status()
+            category_id = response.json().get("items", [])[0].get("snippet", {}).get("categoryId", "")
+
+            category_url = f"https://www.googleapis.com/youtube/v3/videoCategories?part=snippet&id={category_id}&key={API_KEY}"
+            category_response = await client.get(category_url)
+            category_response.raise_for_status()
+            return category_response.json().get("items", [])[0].get("snippet", {}).get("title", "")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error in getting video category: {e}")
 
 
 def extract_tags_from_description(description: str):
@@ -82,7 +87,21 @@ def extract_tags_from_description(description: str):
     return tags_in_desc
 
 
-def fetch_video_data(res, each, search_query):
+async def fetch_location(video_id: str):
+    details_url = f"https://www.googleapis.com/youtube/v3/videos?part=recordingDetails&id={video_id}&key={API_KEY}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(details_url)
+            response.raise_for_status()
+            recording_details = response.json().get("items", [])[0].get("recordingDetails", {})
+            location = recording_details.get("location", "location not mentioned")
+            return location
+        except Exception as e:
+            return f"Error fetching location: {e}"
+
+
+async def fetch_video_data(res, each, search_query):
     try:
         video_id = res['items'][each]['id']['videoId']
         video_url = f"https://www.youtube.com/watch?v={video_id}"
@@ -94,21 +113,12 @@ def fetch_video_data(res, each, search_query):
         tags += tags_in_desc
         topic = search_query
         publishedAt = res["items"][each]["snippet"]["publishedAt"]
-        view_count, comment_count = get_video_details(video_id)
-        duration = get_video_duration(video_id)
-        category_name = get_video_category_name(video_id)
-        transcript_data = get_video_transcript(video_id)
+        view_count, comment_count = await get_video_details(video_id)
+        duration = await get_video_duration(video_id)
+        category_name = await get_video_category_name(video_id)
+        transcript_data = await asyncio.to_thread(get_video_transcript,video_id)
 
-       
-        location = "location not mentioned"
-        try:
-            details_url = f"https://www.googleapis.com/youtube/v3/videos?part=recordingDetails&id={video_id}&key={API_KEY}"
-            response = requests.get(details_url)
-            response.raise_for_status()
-            recording_details = response.json().get("items", [])[0].get("recordingDetails", {})
-            location = recording_details.get("location", "location not mentioned")
-        except Exception as e:
-            location = f"Error fetching location: {e}"
+        location = await fetch_location(video_id)
 
         return [
             video_url, title, desc, channelTitle, tags, topic, publishedAt,
@@ -138,12 +148,10 @@ def save_to_csv(data):
 
     try:    
         df = pd.DataFrame(data,columns=columns)
-        if not os.path.exists("app/data/video_data.csv"):
-            df.to_csv("app/data/video_data.csv", index=False, mode='w', header=True)
-        else:
-            df.to_csv("app/data/video_data.csv", index=False, mode='a', header=False)
+        df.to_csv("video_data.csv",index=False)
+
     except Exception as e:
-        return {"error": f"Error in saving data to CSV: {e}"}
+        return f"Error in saving to csv: {e}"
 
 
 @app.post("/get_videos")
@@ -165,12 +173,19 @@ async def get_videos(request: VideoRequest):
                 pageToken=next_page_token  
             ).execute()
 
+            tasks = []
+
             for each in range(len(res["items"])):
-                try:
-                    video_data = fetch_video_data(res, each, search_query)
-                    data.append(video_data)
-                except Exception as e:
-                    data.append([f"Error processing video: {e}"])
+                tasks.append(fetch_video_data(res, each, search_query))
+            
+            results = await asyncio.gather(*tasks,return_exceptions=True)
+                
+            for result in results:
+                if isinstance(result,Exception):
+                    data.append([f"Error processing video: {result}"])
+                else:
+                    data.append(result)
+
 
             next_page_token = res.get('nextPageToken') 
             if not next_page_token: 
@@ -182,7 +197,4 @@ async def get_videos(request: VideoRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error in fetching YouTube search results: {e}")
-
-
-    
 
