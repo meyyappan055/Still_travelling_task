@@ -39,7 +39,7 @@ async def get_video_details(video_id: str):
             raise HTTPException(status_code=500, detail=f"Error in getting video details: {e}")
 
 
-def get_video_transcript(video_id: str):
+async def get_video_transcript(video_id: str):
     try : 
         transcript = get_transcript(video_id)
         return {"transcript": transcript, "has_transcript": True}
@@ -98,27 +98,33 @@ async def fetch_location(video_id: str):
             location = recording_details.get("location", "location not mentioned")
             return location
         except Exception as e:
-            return f"Error fetching location: {e}"
+            raise HTTPException(status_code=500, detail=f"Error in getting video location: {e}")
 
 
 async def fetch_video_data(res, each, search_query):
     try:
-        video_id = res['items'][each]['id']['videoId']
+        video_id = res['items'][each]['id'].get('videoId', None)
+        if not video_id:
+            raise ValueError("videoId is missing in the response.")
         video_url = f"https://www.youtube.com/watch?v={video_id}"
-        title = res["items"][each]["snippet"]["title"]
-        desc = res["items"][each]["snippet"]["description"]
-        channelTitle = res["items"][each]["snippet"]["channelTitle"]
+        snippet = res["items"][each]["snippet"]
+        title = snippet.get("title", "No Title")
+        desc = snippet.get("description", "No Description")
+        channelTitle = snippet.get("channelTitle", "No Channel Title")
         tags_in_desc = extract_tags_from_description(desc)
-        tags = res["items"][each]["snippet"].get("tags", [])
-        tags += tags_in_desc
+        tags = snippet.get("tags", []) + tags_in_desc
         topic = search_query
-        publishedAt = res["items"][each]["snippet"]["publishedAt"]
-        view_count, comment_count = await get_video_details(video_id)
-        duration = await get_video_duration(video_id)
-        category_name = await get_video_category_name(video_id)
-        transcript_data = await asyncio.to_thread(get_video_transcript,video_id)
+        publishedAt = snippet.get("publishedAt", "Unknown Date")
 
-        location = await fetch_location(video_id)
+        video_details, duration, category_name, transcript_data, location = await asyncio.gather(
+            get_video_details(video_id),
+            get_video_duration(video_id),
+            get_video_category_name(video_id),
+            get_video_transcript(video_id),
+            fetch_location(video_id)
+        )
+
+        view_count, comment_count = video_details
 
         return [
             video_url, title, desc, channelTitle, tags, topic, publishedAt,
@@ -126,7 +132,8 @@ async def fetch_video_data(res, each, search_query):
         ]
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error in processing video data: {e}")
+        return f"Error processing video {each}: {e}"
+        
 
 
 def save_to_csv(data):
