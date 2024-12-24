@@ -18,13 +18,14 @@ A FastAPI-based application for analyzing video data from YouTube. This app retr
 
 ## Requirements
 
-- Python
-- `googleapiclient`
+- `google-api-python-client`
 - `fastapi`
 - `pandas`
 - `httpx`
 - `pydantic`
 - `python-dotenv`
+- `uvicorn`
+- `youtube-transcript-api`
 - YouTube Data API v3 key
 
 ---
@@ -59,7 +60,7 @@ To run the FastAPI application locally, use the following command:
 
 ```bash
 cd scripts
-uvicorn main:app --reload
+uvicorn video_data_fetcher:app --reload
 ```
 This will start the server at http://127.0.0.1:8000. You can access the API documentation at http://127.0.0.1:8000/docs
 
@@ -98,3 +99,10 @@ Once the video data is fetched, it will be saved to a CSV file named `video_data
 - `Category Name`
 - `Transcript`
 - `Location`
+  
+---
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
